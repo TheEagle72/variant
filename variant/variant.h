@@ -1,180 +1,266 @@
 #pragma once
 
 #include <memory>
-#include <typeinfo>
 
-template <typename... Types>
-struct variant;
+template<int I, typename... Types>
+struct get_nth_type;
 
-template <>
-struct variant<>
+template <int I, typename Head, typename... Tail>
+struct get_nth_type<I, Head, Tail...>
 {
-	variant(size_t index) {}
-	template <typename T> variant(size_t index, const T& t) {}
-	template <typename T> variant& operator=(const T& value) { return *this; }
-	static size_t index() { throw::std::exception("variant holds no value"); }
-	[[nodiscard]] static bool valueless_by_exception() { return true; }
-	[[nodiscard]] bool operator<(const variant& other) const { return false; }
+	using type = typename get_nth_type<I - 1, Tail...>::type;
 };
 
 template <typename Head, typename... Tail>
-struct variant<Head, Tail...> : variant<Tail...>
+struct get_nth_type<0, Head, Tail...>
+{
+	using type = Head;
+};
+
+template<typename... Types>
+struct get_max_size;
+
+template <typename Head, typename... Tail>
+struct get_max_size<Head, Tail...>
+{
+	constexpr static size_t size()
+	{
+		return std::max(sizeof(Head), get_max_size<Tail...>::size());
+	}
+};
+
+template <typename Head>
+struct get_max_size<Head>
+{
+	constexpr static size_t size() { return sizeof(Head); }
+};
+
+template <int I, typename Find, typename... Types>
+struct get_index_of_type;
+
+template <int I, typename Find, typename Head, typename... Tail>
+struct get_index_of_type<I, Find, Head, Tail...>
+{
+	constexpr static size_t index()
+	{
+		if (std::is_same_v<Find, Head>)
+		{
+			return I;
+		}
+		else
+		{
+			return  get_index_of_type < I + 1, Find, Tail...>::index();
+		}
+
+	}
+};
+
+template <int I, typename Find>
+struct get_index_of_type<I, Find>
+{
+	constexpr static size_t index()
+	{
+		return -1;
+	}
+};
+
+template <typename  ... Types>
+struct unique_types;
+
+template <class T1, class T2, class ... Tail>
+struct unique_types<T1, T2, Tail ...>
+{
+	constexpr static  bool is_true = (unique_types<T1, T2>::is_true && unique_types<T1, Tail ...>::is_true && unique_types < T2, Tail ...>::is_true);
+};
+
+template <class T1, class T2>
+struct unique_types<T1, T2>
+{
+	constexpr static  bool is_true = (!std::is_same_v<T1, T2>);
+};
+
+
+template <typename... Types>
+struct variant
 {
 private:
 	bool holds_value = false;
 	std::unique_ptr<void*> ptr_;
 	size_t index_;
-	void reset();
-
+	size_t byte_size_ = 0;
 public:
-	variant();
-	variant(size_t index);
-
-	template <typename T> variant(const T& value);
-	template <typename T> variant(size_t index, const T& value);
-
+	variant() requires unique_types<Types...>::is_true;
+	template <typename T> variant(const T& value) requires unique_types<Types...>::is_true;
 	variant(const variant& other);
-	//variant(variant&& other) noexcept; //todo implement
-	~variant();
+	variant(variant&& other) noexcept; //todo implement
+	~variant() = default;
 
-	template<typename T> variant& operator=(const variant& other);
-	template<typename T> variant& operator=(const T& value);
-	//template<typename T> variant& operator=(T&& value) noexcept;
+	variant& operator=(const variant& other);
 
+	template<typename T>
+	variant& operator=(const T& value);
+
+	// template<typename T>
+	// variant& operator=(T&& value) noexcept;
+
+	bool operator==(const variant& other) noexcept;
+	bool operator!=(const variant& other) noexcept;
 	bool operator<(const variant& other) noexcept;
+	bool operator>(const variant& other) noexcept;
 
 	[[nodiscard]] size_t index() const;
 	[[nodiscard]] bool valueless_by_exception() const;
 	void swap(variant& other) noexcept;
-	template <class T, class... Args> T& emplace(Args&&... args);
 
-	typedef variant<Tail...> base_type;
-	typedef Head value_type;
+	template<size_t I, typename... TypesOf>
+	friend typename  get_nth_type<I, TypesOf...>::type get(const variant <TypesOf...>& v);
 
-	base_type& base = static_cast<base_type&>(*this);
+	template<typename Head, typename... TypesOf>
+	friend typename  get_nth_type<get_index_of_type<0, Head, TypesOf...>::index(), TypesOf...>::type get(const variant <TypesOf...>& v);
 };
 
-template <typename Head, typename ... Tail>
-void variant<Head, Tail...>::reset()
+template <typename ... Types>
+variant<Types...>::variant() requires unique_types<Types...>::is_true : index_(0), byte_size_(get_max_size<Types...>::size())
 {
-	if (holds_value)
-	{
-		delete static_cast<value_type*>(*ptr_);
-		ptr_.reset();
-		holds_value = false;
-	}
+	holds_value = true;
+	ptr_ = std::make_unique<void*>(new char[byte_size_]);
 }
 
-template <typename Head, typename ... Tail>
-variant<Head, Tail...>::variant()
-	: variant<Tail...>(static_cast<size_t>(1)), index_(0) {}
-
-template <typename Head, typename ... Tail>
-variant<Head, Tail...>::variant(const size_t index)
-	: variant<Tail...>(index + 1), index_(index) {}
-
-template <typename Head, typename ... Tail>
+template <typename ... Types>
 template <typename T>
-variant<Head, Tail...>::variant(const T& value)
-	: variant<Tail...>(1, value), index_(0)
+variant<Types...>::variant(const T& value) requires unique_types<Types...>::is_true : index_(get_index_of_type<0, T, Types...>::index()), byte_size_(get_max_size<Types...>::size())
 {
-	if (typeid(value_type) == typeid(decltype(value)))
+	holds_value = true;
+	ptr_ = std::make_unique<void*>(new char[byte_size_]);
+	memcpy(ptr_.get(), &value, byte_size_);
+}
+
+template <typename ... Types>
+variant<Types...>::variant(const variant& other) : index_(other.index())
+{
+	holds_value = other.holds_value;
+	memcpy(ptr_.get(), other.ptr_.get(), byte_size_);
+}
+
+template <typename ... Types>
+variant<Types...>::variant(variant&& other) noexcept : index_(other.index())
+{
+	holds_value = other.holds_value;
+	ptr_.reset(other.ptr_.release());
+}
+
+template <typename ... Types>
+variant<Types...>& variant<Types...>::operator=(const variant& other)
+{
+	holds_value = other.holds_value;
+	if (byte_size_ != other.byte_size_)
 	{
-		ptr_ = std::make_unique<void*>(static_cast<void*>(new T{ value }));
-		holds_value = true;
-	}
-}
-
-template <typename Head, typename ... Tail>
-template <typename T>
-variant<Head, Tail...>::variant(const size_t index, const T& value)
-	: variant<Tail...>(index + 1, value), index_(index)
-{
-	if (typeid(value_type) == typeid(decltype(value)))
-	{
-		ptr_ = std::make_unique<void*>(static_cast<void*>(new T{ value }));
-		holds_value = true;
-	}
-}
-
-template <typename Head, typename ... Tail>
-variant<Head, Tail...>::variant(const variant& other)
-{
-	ptr_ = { other.ptr_ };
-	base = { other.base };
-}
-
-
-template <typename Head, typename ... Tail>
-variant<Head, Tail...>::~variant()
-{
-	delete static_cast<value_type*>(*ptr_);
-}
-
-template <typename Head, typename ... Tail>
-template <typename T>
-variant<Head, Tail...>& variant<Head, Tail...>::operator=(const variant& other)
-{
-		
-}
-
-template <typename Head, typename ... Tail>
-template <typename T>
-variant<Head, Tail...>& variant<Head, Tail...>::operator=(const T& value)
-{
-	reset();
-	if (typeid(value_type) == typeid(decltype(value)))
-	{
-		holds_value = true;
-		ptr_ = std::make_unique<void*>(static_cast<void*>(new T{ value }));
+		throw std::exception("different sizes");
 	}
 
-	base.operator=(value);
+	index_ = other.index();
+	memcpy(ptr_.get(), other.ptr_.get(), byte_size_);
 	return *this;
 }
 
-template <typename Head, typename ... Tail>
-bool variant<Head, Tail...>::operator<(const variant& other) noexcept
+template <typename ... Types>
+template <typename T>
+variant<Types...>& variant<Types...>::operator=(const T& value)
 {
-	if (holds_value != other.holds_value)
-	{
-		return false;
-	}
+	holds_value = true;
+	index_ = get_index_of_type<0, T, Types...>::index();
+	memcpy(ptr_.get(), &value, sizeof(T));
 
-	if (holds_value)
-	{
-		value_type lhs = *static_cast<value_type*>(*ptr_);
-		value_type rhs = *static_cast<value_type*>(*other.ptr_);
-		return lhs < rhs;
-	}
-
-	return (base < other.base);
+	return *this;
 }
 
-template <typename Head, typename... Tail>
-size_t variant<Head, Tail...>::index() const
+template <typename ... Types>
+bool variant<Types...>::operator==(const variant& other) noexcept
 {
-	if (holds_value)
-	{
-		return index_;
-	}
-	return base.index();
+	return (!(*this < other) && !(*this > other));
 }
 
-template <typename Head, typename ... Tail>
-bool variant<Head, Tail...>::valueless_by_exception() const
+template <typename ... Types>
+bool variant<Types...>::operator!=(const variant& other) noexcept
 {
-	if (holds_value)
-	{
-		return false;
-	}
-
-	return base.valueless_by_exception();
+	return !(*this == other);
 }
 
-template <typename Head, typename ... Tail>
-void variant<Head, Tail...>::swap(variant& other) noexcept
+template <typename ... Types>
+bool variant<Types...>::operator<(const variant& other) noexcept
+{
+	if (index_ != other.index())
+	{
+		throw std::exception("trying to compare variant with diffent index");
+	}
+
+	return false;
+}
+
+template <typename ... Types>
+bool variant<Types...>::operator>(const variant& other) noexcept
+{
+	return !(*this < other);
+}
+
+
+template <typename ... Types>
+size_t variant<Types...>::index() const
+{
+	return index_;
+}
+
+template <typename ... Types>
+bool variant<Types...>::valueless_by_exception() const
+{
+	return !holds_value;
+}
+
+template <typename ... Types>
+void variant<Types...>::swap(variant& other) noexcept
 {
 	ptr_.swap(other.ptr_);
-	base.swap(other.base);
+}
+
+template<size_t I, typename... Types>
+typename  get_nth_type<I, Types...>::type get(const variant <Types...>& v)
+{
+	using type = typename get_nth_type<I, Types...>::type;
+
+	if (v.valueless_by_exception())
+	{
+		throw std::exception("variant have no value");
+	}
+
+	if (v.index_ != I)
+	{
+		throw std::exception("wrong type");
+	}
+
+	type value{};
+	memset(&value, 0, sizeof(value));
+	memcpy(&value, v.ptr_.get(), sizeof(value));
+	return value;
+}
+
+template<typename Head, typename... TypesOf>
+typename  get_nth_type<get_index_of_type<0, Head, TypesOf...>::index(), TypesOf...>::type get(const variant <TypesOf...>& v)
+{
+	constexpr int I = get_index_of_type<0, Head, TypesOf...>::index();
+	using type = typename get_nth_type<I, TypesOf...>::type;
+
+	if (v.valueless_by_exception())
+	{
+		throw std::exception("variant have no value");
+	}
+
+	if (v.index_ != I)
+	{
+		throw std::exception("wrong type");
+	}
+
+	type value;
+	memset(&value, 0, sizeof(value));
+	memcpy(&value, v.ptr_.get(), sizeof(type));
+	return value;
 }
