@@ -85,7 +85,7 @@ struct variant
 {
 private:
 	bool holds_value = false;
-	std::unique_ptr<void*> ptr_;
+	std::unique_ptr<std::byte[]> ptr_;
 	size_t index_;
 	size_t byte_size_ = 0;
 public:
@@ -123,7 +123,7 @@ template <typename ... Types>
 variant<Types...>::variant() requires unique_types<Types...>::is_true : index_(0), byte_size_(get_max_size<Types...>::size())
 {
 	holds_value = true;
-	ptr_ = std::make_unique<void*>(new char[byte_size_]);
+	ptr_ = std::make_unique<std::byte[]>(byte_size_);
 }
 
 template <typename ... Types>
@@ -131,7 +131,7 @@ template <typename T>
 variant<Types...>::variant(const T& value) requires unique_types<Types...>::is_true : index_(get_index_of_type<0, T, Types...>::index()), byte_size_(get_max_size<Types...>::size())
 {
 	holds_value = true;
-	ptr_ = std::make_unique<void*>(new char[byte_size_]);
+	ptr_ = std::make_unique<std::byte[]>(byte_size_);
 	memcpy(ptr_.get(), &value, byte_size_);
 }
 

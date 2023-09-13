@@ -18,8 +18,8 @@ int main()
 	std::cout << v.valueless_by_exception() << std::endl;
 	std::cout << v.index() << std::endl;
 
-	std::cout << get<double>(w);
-	std::cout << get<1>(w);
+	std::cout << get<double>(w) << std::endl;
+	std::cout << get<1>(w) << std::endl;
 	
 
 
